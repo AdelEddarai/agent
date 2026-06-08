@@ -1,8 +1,17 @@
 {
-  "buildCommand": "turbo run build --filter=sim",
-  "installCommand": "bun install",
+  "buildCommand": "cd apps/sim && bun run build:vercel",
+  "installCommand": "bun install --frozen-lockfile",
   "framework": null,
   "outputDirectory": "apps/sim/.next",
   "cleanUrls": true,
-  "trailingSlash": false
+  "trailingSlash": false,
+  "functions": {
+    "apps/sim/app/api/**/*.ts": {
+      "memory": 3008,
+      "maxDuration": 60
+    }
+  },
+  "github": {
+    "silent": true
+  }
 }

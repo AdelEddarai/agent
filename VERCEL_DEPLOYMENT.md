@@ -2,10 +2,50 @@
 
 This guide explains how to deploy only the `sim` app (not `docs` or `realtime`) to Vercel from this monorepo.
 
+## Memory Optimization Strategy
+
+This project has been optimized to work within Vercel's 8GB memory limit by:
+
+1. **Staged Build Process** - Builds sandbox bundles separately from Next.js
+2. **Reduced Node Memory** - Uses 6GB instead of 8GB to prevent OOM kills
+3. **Optimized Next.js Config** - Disables source maps, uses SWC minification
+4. **Single-threaded Build** - Reduces parallel memory usage
+5. **Aggressive Cleanup** - Removes cache between build stages
+
 ## Files Created
 
-1. **`vercel.json`** - Configures Vercel to build only the `sim` app
+1. **`vercel.json`** - Main Vercel configuration with optimized build command
 2. **`.vercelignore`** - Excludes unnecessary files from deployment
+3. **`apps/sim/next.config.vercel.ts`** - Memory-optimized Next.js config for Vercel
+4. **`apps/sim/build-vercel.sh`** - Staged build script that reduces memory usage
+
+## Quick Start
+
+### Option 1: Standard Vercel Free Tier (8GB Memory)
+
+Use the optimized build configuration (already configured):
+
+```bash
+# This is what Vercel will run
+cd apps/sim && chmod +x build-vercel.sh && ./build-vercel.sh
+```
+
+### Option 2: Upgrade to Pro Plan (16GB Memory)
+
+If you have Vercel Pro, enable Enhanced Compute:
+
+1. Go to Project Settings → General
+2. Enable "Enhanced Compute" 
+3. Update `vercel.json`:
+
+```json
+{
+  "buildCommand": "turbo run build --filter=sim",
+  "installCommand": "bun install --frozen-lockfile"
+}
+```
+
+This allows the standard 8GB build without optimization tricks.
 
 ## Vercel Dashboard Setup
 
@@ -21,9 +61,10 @@ Vercel should automatically detect the `vercel.json` configuration, but verify:
 
 - **Framework Preset**: Other (or None)
 - **Root Directory**: Leave empty (monorepo root)
-- **Build Command**: `turbo run build --filter=sim`
+- **Build Command**: `cd apps/sim && chmod +x build-vercel.sh && ./build-vercel.sh`
 - **Output Directory**: `apps/sim/.next`
-- **Install Command**: `bun install`
+- **Install Command**: `bun install --frozen-lockfile`
+- **Node.js Version**: 20.x or higher
 
 ### 3. Environment Variables
 
@@ -116,6 +157,56 @@ The `vercel.json` file tells Vercel:
 }
 ```
 
+### Build Fails with SIGKILL (Exit Code 137) - Out of Memory
+
+**Symptoms:**
+```
+error: script "build" was terminated by signal SIGKILL (Forced quit)
+ERROR  sim#build: command (/vercel/path0/apps/sim) /bun1/bun run build exited (137)
+```
+
+**Root Cause:** Build process exceeds Vercel's 8GB memory limit. This happens because:
+- 15+ AWS SDK packages (~2GB)
+- Multiple database drivers (MongoDB, MySQL, Neo4j)
+- Heavy AI SDKs (Anthropic, Google, OpenAI)
+- Monaco Editor, PDF processing, FFmpeg
+- Large Next.js bundle compilation
+
+**Solutions (in order of preference):**
+
+1. **Use the Optimized Build (Already Configured)**
+   - The project now uses `apps/sim/build-vercel.sh` which:
+     - Reduces Node memory to 6GB (safer than 8GB)
+     - Builds in stages (sandbox → Next.js)
+     - Cleans up between stages
+     - Uses memory-optimized Next.js config
+   - This should work on Vercel Free tier
+
+2. **Upgrade to Vercel Pro + Enhanced Compute**
+   - Vercel Pro gives 16GB memory with Enhanced Compute
+   - Go to Project Settings → General → Enable "Enhanced Compute"
+   - Cost: $20/month
+   - [Learn more](https://vercel.com/docs/deployments/build-environments)
+
+3. **Further Optimize Dependencies**
+   - Remove unused AWS SDK clients
+   - Use dynamic imports for heavy packages
+   - Split large API routes into separate functions
+
+4. **Use External Build Process**
+   - Build on GitHub Actions (14GB memory)
+   - Upload build artifacts to Vercel
+   - Requires custom deployment workflow
+
+**Quick Fix to Try First:**
+
+Ensure `next.config.vercel.ts` is being used. In Vercel Dashboard, add env var:
+```
+NEXT_CONFIG_FILE=next.config.vercel.ts
+```
+
+Then redeploy.
+
 ### Build Command Not Found
 
 **Solution:** Ensure `turbo` is installed as a devDependency in root `package.json`.
@@ -127,11 +218,12 @@ The `vercel.json` file tells Vercel:
 2. Use `NEXT_PUBLIC_` prefix for client-side variables
 3. Redeploy after adding new variables
 
-### Build Timeout
+### Build Takes Too Long (>45 minutes)
 
-**Solution:** The build has high memory requirements. In `vercel.json`, you can't set memory limits directly, but you can:
-1. Contact Vercel support for increased limits
-2. Optimize the build by removing unused dependencies
+**Solution:** 
+1. Enable build cache in Vercel (automatic)
+2. Use the optimized build script (already configured)
+3. Upgrade to Pro for faster build machines
 
 ### Realtime Features Not Working
 
