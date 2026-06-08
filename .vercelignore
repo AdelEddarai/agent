@@ -1,0 +1,53 @@
+# Apps not being deployed
+apps/docs
+apps/realtime
+
+# Development files
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+**/__tests__
+**/test
+**/tests
+vitest.config.ts
+vitest.setup.ts
+
+# Documentation
+*.md
+!README.md
+
+# Docker files
+docker/
+docker-compose*.yml
+Dockerfile*
+
+# Helm charts
+helm/
+
+# Scripts
+scripts/
+
+# CI/CD
+.github/
+.husky/
+
+# Development tools
+.vscode/
+.cursor/
+.agents/
+
+# Linting/formatting configs
+biome.json
+.eslintrc*
+.prettierrc*
+
+# Build artifacts
+.turbo/
+node_modules/.cache
+**/dist
+**/.next/cache
+
+# Environment files (will be set in Vercel dashboard)
+.env.local
+.env*.local

@@ -1,0 +1,8 @@
+{
+  "buildCommand": "turbo run build --filter=sim",
+  "installCommand": "bun install",
+  "framework": null,
+  "outputDirectory": "apps/sim/.next",
+  "cleanUrls": true,
+  "trailingSlash": false
+}
