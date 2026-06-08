@@ -93,6 +93,7 @@ const nextConfig: NextConfig = {
   experimental: {
     optimizeCss: true,
     preloadEntriesOnStart: false,
+    /*
     optimizePackageImports: [
       'lodash',
       'framer-motion',
@@ -110,6 +111,7 @@ const nextConfig: NextConfig = {
       'streamdown',
       'zod',
     ],
+    */
   },
   ...(isDev && {
     serverActions: {

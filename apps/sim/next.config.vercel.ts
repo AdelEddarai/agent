@@ -119,7 +119,8 @@ const nextConfig: NextConfig = {
       memoryBasedWorkersCount: false,
     }),
     
-    // Aggressive package optimization
+    // Aggressive package optimization (DISABLED for Vercel Hobby to prevent OOM SIGKILL)
+    /*
     optimizePackageImports: [
       'lodash',
       'framer-motion',
@@ -140,6 +141,7 @@ const nextConfig: NextConfig = {
       '@tanstack/react-query',
       'date-fns',
     ],
+    */
   },
   
   ...(isDev && {
