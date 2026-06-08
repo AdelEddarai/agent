@@ -114,6 +114,13 @@ const nextConfig: NextConfig = {
     optimizeCss: true,
     preloadEntriesOnStart: false,
     
+    // Memory optimization for Vercel
+    ...(isVercelBuild && {
+      workerThreads: false,
+      cpus: 1,
+      memoryBasedWorkersCount: false,
+    }),
+    
     // Aggressive package optimization
     optimizePackageImports: [
       'lodash',
@@ -135,12 +142,6 @@ const nextConfig: NextConfig = {
       '@tanstack/react-query',
       'date-fns',
     ],
-    
-    // Reduce memory during build
-    ...(isVercelBuild && {
-      workerThreads: false, // Disable worker threads to reduce memory
-      cpus: 1, // Limit to single CPU to reduce parallel memory usage
-    }),
   },
   
   ...(isDev && {
@@ -172,52 +173,23 @@ const nextConfig: NextConfig = {
   // Webpack optimizations for Vercel
   webpack: (config, { isServer, webpack }) => {
     if (isVercelBuild) {
-      // Reduce memory by limiting chunk splitting
+      // Extreme memory reduction
       config.optimization = config.optimization || {}
-      config.optimization.splitChunks = {
-        chunks: 'all',
-        cacheGroups: {
-          default: false,
-          vendors: false,
-          // Split large vendor chunks
-          framework: {
-            chunks: 'all',
-            name: 'framework',
-            test: /(?<!node_modules.*)[\\/]node_modules[\\/](react|react-dom|scheduler|prop-types|use-subscription)[\\/]/,
-            priority: 40,
-            enforce: true,
-          },
-          lib: {
-            test(module: any) {
-              return (
-                module.size() > 160000 &&
-                /node_modules[/\\]/.test(module.identifier())
-              )
-            },
-            name(module: any) {
-              const hash = require('crypto')
-                .createHash('sha1')
-                .update(module.identifier())
-                .digest('hex')
-                .substring(0, 8)
-              return hash
-            },
-            priority: 30,
-            minChunks: 1,
-            reuseExistingChunk: true,
-          },
-          commons: {
-            name: 'commons',
-            minChunks: 2,
-            priority: 20,
-          },
-        },
-        maxInitialRequests: 25,
-        minSize: 20000,
-      }
+      config.optimization.minimize = true
+      config.optimization.splitChunks = false // Disable to save memory
+      config.optimization.runtimeChunk = false
       
-      // Limit parallelism to reduce memory
+      // Limit parallelism to save memory
       config.parallelism = 1
+      
+      // Disable cache to save memory
+      config.cache = false
+      
+      // Reduce module resolution complexity
+      config.snapshot = {
+        managedPaths: [],
+        immutablePaths: [],
+      }
     }
     
     return config

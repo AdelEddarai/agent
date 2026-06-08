@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cd apps/sim && VERCEL=1 bun run build:vercel",
+  "buildCommand": "cd apps/sim && VERCEL=1 NEXT_CONFIG_FILE=next.config.vercel.ts bun run build:vercel",
   "installCommand": "bun install",
   "framework": null,
   "outputDirectory": "apps/sim/.next",
