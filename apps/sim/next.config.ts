@@ -75,7 +75,8 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: isTruthy(env.DOCKER_BUILD),
   },
-  output: isTruthy(env.DOCKER_BUILD) ? 'standalone' : undefined,
+  // Force standalone output for Vercel to avoid 250MB function limit
+  output: isTruthy(env.DOCKER_BUILD) || process.env.VERCEL === '1' ? 'standalone' : undefined,
   serverExternalPackages: [
     '@1password/sdk',
     'unpdf',

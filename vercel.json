@@ -1,16 +1,10 @@
 {
-  "buildCommand": "cd apps/sim && bun run build:vercel",
+  "buildCommand": "cd apps/sim && VERCEL=1 bun run build:vercel",
   "installCommand": "bun install --frozen-lockfile",
   "framework": null,
   "outputDirectory": "apps/sim/.next",
   "cleanUrls": true,
   "trailingSlash": false,
-  "functions": {
-    "apps/sim/app/api/**/*.ts": {
-      "memory": 3008,
-      "maxDuration": 60
-    }
-  },
   "github": {
     "silent": true
   }

@@ -10,11 +10,7 @@ import {
 
 /**
  * Optimized Next.js configuration for Vercel deployment
- * Reduces memory usage during build by:
- * - Disabling source maps in production
- * - Using SWC minification (lighter than Terser)
- * - Limiting worker processes
- * - Aggressive code splitting
+ * Reduces memory usage during build and function bundle sizes
  */
 
 const isVercelBuild = process.env.VERCEL === '1'
@@ -23,10 +19,13 @@ const nextConfig: NextConfig = {
   devIndicators: false,
   poweredByHeader: false,
   
+  // CRITICAL: Use standalone output to avoid 250MB function limit
+  output: 'standalone',
+  
   // Optimize build memory usage
   ...(isVercelBuild && {
-    productionBrowserSourceMaps: false, // Disable source maps to save memory
-    swcMinify: true, // Use SWC instead of Terser (less memory)
+    productionBrowserSourceMaps: false,
+    swcMinify: true,
   }),
   
   images: {
