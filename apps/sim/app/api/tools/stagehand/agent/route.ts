@@ -1,4 +1,5 @@
-import type { Stagehand as StagehandType } from '@browserbasehq/stagehand'
+// import type { Stagehand as StagehandType } from '@browserbasehq/stagehand'
+type StagehandType = any;
 import { createLogger } from '@sim/logger'
 import { getErrorMessage } from '@sim/utils/errors'
 import { type NextRequest, NextResponse } from 'next/server'
@@ -173,6 +174,8 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
     try {
       logger.info('Initializing Stagehand with Browserbase (v3)', { provider, modelName })
 
+      throw new Error("Stagehand is disabled. Firecrawl scraping is enabled but pending full API integration.")
+      /*
       const { Stagehand } = await import('@browserbasehq/stagehand')
 
       stagehand = new Stagehand({
@@ -191,6 +194,7 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
       logger.info('Starting stagehand.init()')
       await stagehand.init()
       logger.info('Stagehand initialized successfully')
+      */
 
       sessionId = stagehand.browserbaseSessionID ?? null
       if (sessionId) {

@@ -83,17 +83,11 @@ const nextConfig: NextConfig = {
   serverExternalPackages: [
     '@1password/sdk',
     'unpdf',
-    'ffmpeg-static',
-    'fluent-ffmpeg',
-    'ws',
-    'isolated-vm',
   ],
   outputFileTracingIncludes: {
-    '/api/tools/stagehand/*': ['./node_modules/ws/**/*'],
     '/*': [
       './node_modules/sharp/**/*',
       './node_modules/@img/**/*',
-      './lib/execution/sandbox/bundles/*.cjs',
     ],
   },
   experimental: {

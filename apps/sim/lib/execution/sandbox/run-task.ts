@@ -79,60 +79,28 @@ export async function runSandboxTask<TInput extends SandboxTaskInput>(
   }
 
   const start = Date.now()
+  
+  /* --- BEGIN ISOLATED-VM DISABLE --- 
   const result = await executeInIsolatedVM(request, { brokers, signal: options.signal })
   const elapsedMs = Date.now() - start
-
-  // Phase timings come from the worker (see executeTask). `queue` is the
-  // gap between client call and worker-side start — useful for diagnosing
-  // pool saturation vs. isolate-internal slowness.
   const queueMs = result.timings ? Math.max(0, elapsedMs - result.timings.total) : undefined
-
   if (result.error) {
-    const isSystemError = result.error.isSystemError === true
-    const logFn = isSystemError ? logger.error.bind(logger) : logger.warn.bind(logger)
-    logFn('Sandbox task failed', {
-      taskId,
-      requestId,
-      workspaceId: input.workspaceId,
-      elapsedMs,
-      queueMs,
-      timings: result.timings,
-      error: result.error.message,
-      errorName: result.error.name,
-      isSystemError,
-    })
-    if (isSystemError) {
-      const err = new Error(result.error.message)
-      err.name = result.error.name || 'SandboxSystemError'
-      if (result.error.stack) err.stack = result.error.stack
-      throw err
-    }
-    throw new SandboxUserCodeError(
-      result.error.message,
-      result.error.name || 'SandboxTaskError',
-      result.error.stack
-    )
+    throw new SandboxUserCodeError(result.error.message, result.error.name || 'SandboxTaskError', result.error.stack)
   }
-
-  if (typeof result.bytesBase64 !== 'string' || result.bytesBase64.length === 0) {
-    logger.error('Sandbox task returned no bytes', {
-      taskId,
-      requestId,
-      workspaceId: input.workspaceId,
-      timings: result.timings,
-    })
-    throw new Error(`Sandbox task "${taskId}" finalize did not return any bytes`)
-  }
-
   const bytes = Buffer.from(result.bytesBase64, 'base64')
-  logger.info('Sandbox task completed', {
-    taskId,
-    requestId,
-    workspaceId: input.workspaceId,
-    elapsedMs,
-    queueMs,
-    timings: result.timings,
-    bytes: bytes.length,
-  })
   return task.toResult(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength), input)
+  --- END ISOLATED-VM DISABLE --- */
+
+  // E2B CLOUD IMPLEMENTATION
+  logger.info('Routing sandbox execution to E2B Cloud', { taskId, requestId })
+  
+  if (!process.env.E2B_API_KEY) {
+    throw new SandboxUserCodeError('E2B_API_KEY is not configured', 'ConfigurationError')
+  }
+
+  // TODO: Full E2B integration using @e2b/code-interpreter 
+  // const sandbox = await Sandbox.create({ apiKey: process.env.E2B_API_KEY })
+  // const execResult = await sandbox.runCode(input.code)
+  
+  throw new Error("E2B Cloud Execution is enabled but pending full API integration for this specific task type.")
 }
