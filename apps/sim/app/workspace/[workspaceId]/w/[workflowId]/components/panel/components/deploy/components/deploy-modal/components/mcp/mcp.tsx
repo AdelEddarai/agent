@@ -1,0 +1,622 @@
+'use client'
+
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { createLogger } from '@sim/logger'
+import { useParams } from 'next/navigation'
+import {
+  Badge,
+  Button,
+  Combobox,
+  type ComboboxOption,
+  Input,
+  Label,
+  Skeleton,
+  Textarea,
+} from '@/components/emcn'
+import { cn } from '@/lib/core/utils/cn'
+import { generateToolInputSchema, sanitizeToolName } from '@/lib/mcp/workflow-tool-schema'
+import { normalizeInputFormatValue } from '@/lib/workflows/input-format'
+import { isInputDefinitionTrigger } from '@/lib/workflows/triggers/input-definition-triggers'
+import type { InputFormatField } from '@/lib/workflows/types'
+import { CreateWorkflowMcpServerModal } from '@/app/workspace/[workspaceId]/settings/components/workflow-mcp-servers/create-workflow-mcp-server-modal'
+import {
+  useAddWorkflowMcpTool,
+  useDeleteWorkflowMcpTool,
+  useUpdateWorkflowMcpTool,
+  useWorkflowMcpServers,
+  useWorkflowMcpTools,
+  type WorkflowMcpServer,
+  type WorkflowMcpTool,
+} from '@/hooks/queries/workflow-mcp-servers'
+import { EMPTY_SUBBLOCK_VALUES, useSubBlockStore } from '@/stores/workflows/subblock/store'
+import { useWorkflowStore } from '@/stores/workflows/workflow/store'
+
+const logger = createLogger('McpToolDeploy')
+
+/**
+ * Mirrors the server's `sanitizeToolName` output: lowercase alphanumerics with single
+ * underscores between segments. Disallows leading/trailing and consecutive underscores so
+ * the validated name matches exactly what the server persists (no silent rewrite).
+ */
+const TOOL_NAME_PATTERN = /^[a-z0-9]+(_[a-z0-9]+)*$/
+const MAX_TOOL_NAME_LENGTH = 64
+
+/** InputFormatField with guaranteed name (after normalization) */
+type NormalizedField = InputFormatField & { name: string }
+
+interface McpDeployProps {
+  workflowId: string
+  workflowName: string
+  workflowDescription?: string | null
+  isDeployed: boolean
+  onAddedToServer?: () => void
+  onSubmittingChange?: (submitting: boolean) => void
+  onCanSaveChange?: (canSave: boolean) => void
+}
+
+function haveSameServerSelection(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  const bSet = new Set(b)
+  return a.every((id) => bSet.has(id))
+}
+
+function haveSameParameterDescriptions(
+  a: Record<string, string>,
+  b: Record<string, string>
+): boolean {
+  const aKeys = Object.keys(a)
+  const bKeys = Object.keys(b)
+  if (aKeys.length !== bKeys.length) return false
+  return aKeys.every((key) => a[key] === b[key])
+}
+
+/**
+ * Generate JSON Schema from input format with optional descriptions
+ */
+function generateParameterSchema(
+  inputFormat: NormalizedField[],
+  descriptions: Record<string, string>
+): Record<string, unknown> {
+  const fieldsWithDescriptions = inputFormat.map((field) => ({
+    ...field,
+    description: descriptions[field.name]?.trim() || undefined,
+  }))
+  return { ...generateToolInputSchema(fieldsWithDescriptions) }
+}
+
+/**
+ * Component to query tools for a single server and report back via callback.
+ */
+function ServerToolsQuery({
+  workspaceId,
+  server,
+  workflowId,
+  onData,
+}: {
+  workspaceId: string
+  server: WorkflowMcpServer
+  workflowId: string
+  onData: (serverId: string, tool: WorkflowMcpTool | null, isLoading: boolean) => void
+}) {
+  const { data: tools, isLoading } = useWorkflowMcpTools(workspaceId, server.id)
+
+  useEffect(() => {
+    const tool = tools?.find((t) => t.workflowId === workflowId) || null
+    onData(server.id, tool, isLoading)
+  }, [tools, isLoading, workflowId, server.id, onData])
+
+  return null
+}
+
+export function McpDeploy({
+  workflowId,
+  workflowName,
+  workflowDescription,
+  isDeployed,
+  onAddedToServer,
+  onSubmittingChange,
+  onCanSaveChange,
+}: McpDeployProps) {
+  const params = useParams()
+  const workspaceId = params.workspaceId as string
+  const [showCreateModal, setShowCreateModal] = useState(false)
+
+  const { data: servers = [], isLoading: isLoadingServers } = useWorkflowMcpServers(workspaceId)
+  const addToolMutation = useAddWorkflowMcpTool()
+  const deleteToolMutation = useDeleteWorkflowMcpTool()
+  const updateToolMutation = useUpdateWorkflowMcpTool()
+
+  const blocks = useWorkflowStore((state) => state.blocks)
+
+  const starterBlockId = useMemo(() => {
+    for (const [blockId, block] of Object.entries(blocks)) {
+      if (!block || typeof block !== 'object') continue
+      const blockType = (block as { type?: string }).type
+      if (blockType && isInputDefinitionTrigger(blockType)) {
+        return blockId
+      }
+    }
+    return null
+  }, [blocks])
+
+  const subBlockValues = useSubBlockStore(
+    (state) => (workflowId ? state.workflowValues[workflowId] : undefined) ?? EMPTY_SUBBLOCK_VALUES
+  )
+
+  const inputFormat = useMemo((): NormalizedField[] => {
+    if (!starterBlockId) return []
+
+    const storeValue = subBlockValues[starterBlockId]?.inputFormat
+    const normalized = normalizeInputFormatValue(storeValue) as NormalizedField[]
+    if (normalized.length > 0) return normalized
+
+    const startBlock = blocks[starterBlockId]
+    const blockValue = startBlock?.subBlocks?.inputFormat?.value
+    return normalizeInputFormatValue(blockValue) as NormalizedField[]
+  }, [starterBlockId, subBlockValues, blocks])
+
+  const [toolName, setToolName] = useState(() => sanitizeToolName(workflowName))
+  const [toolDescription, setToolDescription] = useState(() => {
+    const normalizedDesc = workflowDescription?.toLowerCase().trim()
+    const isDefaultDescription =
+      !workflowDescription ||
+      workflowDescription === workflowName ||
+      normalizedDesc === 'new workflow' ||
+      normalizedDesc === 'your first workflow - start building here!'
+
+    return isDefaultDescription ? '' : workflowDescription
+  })
+  const [parameterDescriptions, setParameterDescriptions] = useState<Record<string, string>>({})
+  const [pendingServerChanges, setPendingServerChanges] = useState<Set<string>>(() => new Set())
+  const [saveErrors, setSaveErrors] = useState<string[]>([])
+
+  const parameterSchema = useMemo(
+    () => generateParameterSchema(inputFormat, parameterDescriptions),
+    [inputFormat, parameterDescriptions]
+  )
+
+  const toolNameError = useMemo(() => {
+    const trimmed = toolName.trim()
+    if (!trimmed) return null
+    if (trimmed.length > MAX_TOOL_NAME_LENGTH) {
+      return `Tool name must be ${MAX_TOOL_NAME_LENGTH} characters or fewer`
+    }
+    if (!TOOL_NAME_PATTERN.test(trimmed)) {
+      return 'Use lowercase letters and numbers, separated by single underscores'
+    }
+    return null
+  }, [toolName])
+
+  const [serverToolsMap, setServerToolsMap] = useState<
+    Record<string, { tool: WorkflowMcpTool | null; isLoading: boolean }>
+  >({})
+
+  const handleServerToolData = useCallback(
+    (serverId: string, tool: WorkflowMcpTool | null, isLoading: boolean) => {
+      setServerToolsMap((prev) => {
+        const existing = prev[serverId]
+        if (existing?.tool?.id === tool?.id && existing?.isLoading === isLoading) {
+          return prev
+        }
+        return {
+          ...prev,
+          [serverId]: { tool, isLoading },
+        }
+      })
+    },
+    []
+  )
+
+  const selectedServerIds = useMemo(() => {
+    const ids: string[] = []
+    for (const server of servers) {
+      const toolInfo = serverToolsMap[server.id]
+      if (toolInfo?.tool) {
+        ids.push(server.id)
+      }
+    }
+    return ids
+  }, [servers, serverToolsMap])
+  const [draftSelectedServerIds, setDraftSelectedServerIds] = useState<string[] | null>(null)
+  const [savedValues, setSavedValues] = useState<{
+    toolName: string
+    toolDescription: string
+    parameterDescriptions: Record<string, string>
+  } | null>(null)
+
+  useEffect(() => {
+    if (savedValues) return
+
+    for (const server of servers) {
+      const toolInfo = serverToolsMap[server.id]
+      if (toolInfo?.tool) {
+        const initialToolName = toolInfo.tool.toolName
+
+        const loadedDescription = toolInfo.tool.toolDescription || ''
+        const normalizedLoadedDesc = loadedDescription.toLowerCase().trim()
+        const isDefaultDescription =
+          !loadedDescription ||
+          loadedDescription === workflowName ||
+          normalizedLoadedDesc === 'new workflow' ||
+          normalizedLoadedDesc === 'your first workflow - start building here!'
+        const initialToolDescription = isDefaultDescription ? '' : loadedDescription
+
+        const schema = toolInfo.tool.parameterSchema as Record<string, unknown> | undefined
+        const properties = schema?.properties as
+          | Record<string, { description?: string }>
+          | undefined
+        const initialParameterDescriptions: Record<string, string> = {}
+        if (properties) {
+          for (const [name, prop] of Object.entries(properties)) {
+            if (
+              prop.description &&
+              prop.description !== name &&
+              prop.description !== 'Array of file objects'
+            ) {
+              initialParameterDescriptions[name] = prop.description
+            }
+          }
+        }
+
+        setToolName(initialToolName)
+        setToolDescription(initialToolDescription)
+        setParameterDescriptions(initialParameterDescriptions)
+        setSavedValues({
+          toolName: initialToolName,
+          toolDescription: initialToolDescription,
+          parameterDescriptions: initialParameterDescriptions,
+        })
+        break
+      }
+    }
+  }, [servers, serverToolsMap, workflowName, savedValues])
+
+  const selectedServerIdsForForm = draftSelectedServerIds ?? selectedServerIds
+
+  const hasToolConfigurationChanges = useMemo(() => {
+    if (!savedValues) return false
+    if (toolName !== savedValues.toolName) return true
+    if (toolDescription !== savedValues.toolDescription) return true
+    if (!haveSameParameterDescriptions(parameterDescriptions, savedValues.parameterDescriptions)) {
+      return true
+    }
+    return false
+  }, [toolName, toolDescription, parameterDescriptions, savedValues])
+  const hasServerSelectionChanges = useMemo(
+    () => !haveSameServerSelection(selectedServerIdsForForm, selectedServerIds),
+    [selectedServerIdsForForm, selectedServerIds]
+  )
+  const hasChanges =
+    hasServerSelectionChanges ||
+    (hasToolConfigurationChanges && selectedServerIdsForForm.length > 0)
+
+  useEffect(() => {
+    onCanSaveChange?.(hasChanges && !!toolName.trim() && !toolNameError)
+  }, [hasChanges, toolName, toolNameError, onCanSaveChange])
+
+  const handleSave = async () => {
+    if (!toolName.trim() || toolNameError) return
+
+    const currentIds = new Set(selectedServerIds)
+    const nextIds = new Set(selectedServerIdsForForm)
+    const toAdd = new Set(selectedServerIdsForForm.filter((id) => !currentIds.has(id)))
+    const toRemove = selectedServerIds.filter((id) => !nextIds.has(id))
+    const shouldUpdateExisting = hasToolConfigurationChanges
+
+    if (toAdd.size === 0 && toRemove.length === 0 && !shouldUpdateExisting) return
+
+    onSubmittingChange?.(true)
+    setSaveErrors([])
+    try {
+      const errors: string[] = []
+      const addedEntries: Record<string, { tool: WorkflowMcpTool; isLoading: boolean }> = {}
+      const removedIds: string[] = []
+
+      for (const serverId of toAdd) {
+        setPendingServerChanges((prev) => new Set(prev).add(serverId))
+        try {
+          const addedTool = await addToolMutation.mutateAsync({
+            workspaceId,
+            serverId,
+            workflowId,
+            toolName: toolName.trim(),
+            toolDescription: toolDescription.trim() || undefined,
+            parameterSchema,
+          })
+          addedEntries[serverId] = { tool: addedTool, isLoading: false }
+          onAddedToServer?.()
+          logger.info(`Added workflow ${workflowId} as tool to server ${serverId}`)
+        } catch (error) {
+          const serverName = servers.find((s) => s.id === serverId)?.name || serverId
+          errors.push(`Failed to add to ${serverName}`)
+          logger.error(`Failed to add tool to server ${serverId}:`, error)
+        } finally {
+          setPendingServerChanges((prev) => {
+            const next = new Set(prev)
+            next.delete(serverId)
+            return next
+          })
+        }
+      }
+
+      for (const serverId of toRemove) {
+        const toolInfo = serverToolsMap[serverId]
+        if (!toolInfo?.tool) continue
+
+        setPendingServerChanges((prev) => new Set(prev).add(serverId))
+        try {
+          await deleteToolMutation.mutateAsync({
+            workspaceId,
+            serverId,
+            toolId: toolInfo.tool.id,
+          })
+          removedIds.push(serverId)
+        } catch (error) {
+          const serverName = servers.find((s) => s.id === serverId)?.name || serverId
+          errors.push(`Failed to remove from ${serverName}`)
+          logger.error(`Failed to remove tool from server ${serverId}:`, error)
+        } finally {
+          setPendingServerChanges((prev) => {
+            const next = new Set(prev)
+            next.delete(serverId)
+            return next
+          })
+        }
+      }
+
+      if (shouldUpdateExisting) {
+        for (const serverId of selectedServerIdsForForm) {
+          if (toAdd.has(serverId)) continue
+          const toolInfo = serverToolsMap[serverId]
+          if (!toolInfo?.tool) continue
+
+          try {
+            await updateToolMutation.mutateAsync({
+              workspaceId,
+              serverId,
+              toolId: toolInfo.tool.id,
+              toolName: toolName.trim(),
+              toolDescription: toolDescription.trim() || undefined,
+              parameterSchema,
+            })
+          } catch (error) {
+            const serverName = servers.find((s) => s.id === serverId)?.name || serverId
+            errors.push(`Failed to update on ${serverName}`)
+            logger.error(`Failed to update tool on server ${serverId}:`, error)
+          }
+        }
+      }
+
+      setServerToolsMap((prev) => {
+        const next = { ...prev, ...addedEntries }
+        for (const id of removedIds) {
+          delete next[id]
+        }
+        return next
+      })
+      if (errors.length > 0) {
+        setSaveErrors(errors)
+      } else {
+        setDraftSelectedServerIds(null)
+        setSavedValues({
+          toolName,
+          toolDescription,
+          parameterDescriptions: { ...parameterDescriptions },
+        })
+        onCanSaveChange?.(false)
+      }
+      onSubmittingChange?.(false)
+    } catch (error) {
+      logger.error('Failed to save tool configuration:', error)
+      onSubmittingChange?.(false)
+    }
+  }
+
+  const serverOptions: ComboboxOption[] = useMemo(() => {
+    return servers.map((server) => ({
+      label: server.name,
+      value: server.id,
+    }))
+  }, [servers])
+
+  const handleServerSelectionChange = (newSelectedIds: string[]) => {
+    setDraftSelectedServerIds(newSelectedIds)
+  }
+
+  const selectedServersLabel = useMemo(() => {
+    const count = selectedServerIdsForForm.length
+    if (count === 0) return 'Select servers...'
+    if (count === 1) {
+      const server = servers.find((s) => s.id === selectedServerIdsForForm[0])
+      return server?.name || '1 server'
+    }
+    return `${count} servers selected`
+  }, [selectedServerIdsForForm, servers])
+
+  const isPending = pendingServerChanges.size > 0
+
+  if (!isDeployed) {
+    return (
+      <div className='flex h-full items-center justify-center text-[var(--text-muted)] text-small'>
+        Deploy your workflow first to add it as an MCP tool.
+      </div>
+    )
+  }
+
+  if (isLoadingServers) {
+    return (
+      <div className='-mx-1 space-y-4 px-1'>
+        <div className='space-y-3'>
+          <div>
+            <Skeleton className='mb-[6.5px] h-[16px] w-[70px]' />
+            <Skeleton className='h-[34px] w-full rounded-sm' />
+          </div>
+          <div>
+            <Skeleton className='mb-[6.5px] h-[16px] w-[80px]' />
+            <Skeleton className='h-[34px] w-full rounded-sm' />
+          </div>
+          <div>
+            <Skeleton className='mb-[6.5px] h-[16px] w-[50px]' />
+            <Skeleton className='h-[34px] w-full rounded-sm' />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (servers.length === 0) {
+    return (
+      <>
+        <div className='flex h-full flex-col items-center justify-center gap-3'>
+          <p className='text-[13px] text-[var(--text-muted)]'>
+            Create an MCP Server to expose your workflows as tools.
+          </p>
+          <Button variant='tertiary' onClick={() => setShowCreateModal(true)}>
+            Create MCP Server
+          </Button>
+        </div>
+        <CreateWorkflowMcpServerModal
+          open={showCreateModal}
+          onOpenChange={setShowCreateModal}
+          workspaceId={workspaceId}
+        />
+      </>
+    )
+  }
+
+  return (
+    <form
+      id='mcp-deploy-form'
+      className='-mx-1 space-y-3 px-1'
+      onSubmit={(e) => {
+        e.preventDefault()
+        handleSave()
+      }}
+    >
+      <button type='submit' hidden />
+
+      {servers.map((server) => (
+        <ServerToolsQuery
+          key={server.id}
+          workspaceId={workspaceId}
+          server={server}
+          workflowId={workflowId}
+          onData={handleServerToolData}
+        />
+      ))}
+
+      <div>
+        <Label className='mb-[6.5px] block pl-0.5 font-medium text-[var(--text-primary)] text-small'>
+          Tool name
+        </Label>
+        <Input
+          value={toolName}
+          onChange={(e) => setToolName(e.target.value)}
+          placeholder='e.g., book_flight'
+          aria-invalid={!!toolNameError}
+          className={cn(toolNameError && 'border-[var(--text-error)]')}
+        />
+        <p
+          className={cn(
+            'mt-[6.5px] text-xs',
+            toolNameError ? 'text-[var(--text-error)]' : 'text-[var(--text-secondary)]'
+          )}
+        >
+          {toolNameError ?? 'Use lowercase letters, numbers, and underscores only'}
+        </p>
+      </div>
+
+      <div>
+        <Label className='mb-[6.5px] block pl-0.5 font-medium text-[var(--text-primary)] text-small'>
+          Description
+        </Label>
+        <Textarea
+          placeholder='Describe what this tool does...'
+          className='min-h-[100px] resize-none'
+          value={toolDescription}
+          onChange={(e) => setToolDescription(e.target.value)}
+        />
+      </div>
+
+      {inputFormat.length > 0 && (
+        <div>
+          <Label className='mb-[6.5px] block pl-0.5 font-medium text-[var(--text-primary)] text-small'>
+            Parameters ({inputFormat.length})
+          </Label>
+          <div className='flex flex-col gap-2'>
+            {inputFormat.map((field) => (
+              <div
+                key={field.name}
+                className='overflow-hidden rounded-sm border border-[var(--border-1)]'
+              >
+                <div className='flex items-center justify-between bg-[var(--surface-4)] px-2.5 py-[5px]'>
+                  <div className='flex min-w-0 flex-1 items-center gap-2'>
+                    <span className='block truncate font-medium text-[var(--text-tertiary)] text-sm'>
+                      {field.name}
+                    </span>
+                    <Badge variant='type' size='sm'>
+                      {field.type}
+                    </Badge>
+                  </div>
+                </div>
+                <div className='rounded-b-[4px] border-[var(--border-1)] border-t bg-[var(--surface-2)] px-2.5 pt-1.5 pb-2.5'>
+                  <div className='flex flex-col gap-1.5'>
+                    <Label className='text-small'>Description</Label>
+                    <Input
+                      value={parameterDescriptions[field.name] || ''}
+                      onChange={(e) =>
+                        setParameterDescriptions((prev) => ({
+                          ...prev,
+                          [field.name]: e.target.value,
+                        }))
+                      }
+                      placeholder={`Enter description for ${field.name}`}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <Label className='mb-[6.5px] block pl-0.5 font-medium text-[var(--text-primary)] text-small'>
+          Servers
+        </Label>
+        <Combobox
+          options={serverOptions}
+          multiSelect
+          multiSelectValues={selectedServerIdsForForm}
+          onMultiSelectChange={handleServerSelectionChange}
+          placeholder='Select servers...'
+          searchable
+          searchPlaceholder='Search servers...'
+          disabled={!toolName.trim() || !!toolNameError || isPending}
+          overlayContent={
+            <span className='truncate text-[var(--text-primary)]'>{selectedServersLabel}</span>
+          }
+        />
+        {!toolName.trim() ? (
+          <p className='mt-[6.5px] text-[var(--text-secondary)] text-xs'>
+            Enter a tool name to select servers
+          </p>
+        ) : toolNameError ? (
+          <p className='mt-[6.5px] text-[var(--text-secondary)] text-xs'>
+            Fix the tool name to select servers
+          </p>
+        ) : null}
+      </div>
+
+      {saveErrors.length > 0 && (
+        <div className='mt-[6.5px] flex flex-col gap-0.5'>
+          {saveErrors.map((error) => (
+            <p key={error} className='text-[var(--text-error)] text-caption'>
+              {error}
+            </p>
+          ))}
+        </div>
+      )}
+    </form>
+  )
+}
