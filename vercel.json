@@ -1,6 +1,6 @@
 {
   "buildCommand": "cd apps/sim && VERCEL=1 bun run build:vercel",
-  "installCommand": "bun install --frozen-lockfile",
+  "installCommand": "bun install",
   "framework": null,
   "outputDirectory": "apps/sim/.next",
   "cleanUrls": true,
