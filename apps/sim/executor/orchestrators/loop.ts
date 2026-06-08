@@ -2,8 +2,10 @@ import { createLogger } from '@sim/logger'
 import { toError } from '@sim/utils/errors'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { isExecutionCancelled, isRedisCancellationEnabled } from '@/lib/execution/cancellation'
-import { executeInIsolatedVM } from '@/lib/execution/isolated-vm'
+// import { executeInIsolatedVM } from '@/lib/execution/isolated-vm'
+import { executeInE2B } from '@/lib/execution/e2b'
 import { compactSubflowResults } from '@/lib/execution/payloads/serializer'
+import { CodeLanguage } from '@/lib/execution/languages'
 import { isLikelyReferenceSegment } from '@/lib/workflows/sanitization/references'
 import {
   buildLoopIndexCondition,
@@ -742,30 +744,35 @@ export class LoopOrchestrator {
       const requestId = generateRequestId()
       const code = `return Boolean(${evaluatedCondition})`
 
-      const vmResult = await executeInIsolatedVM({
-        code,
-        params: {},
-        envVars: {},
-        contextVariables: {},
+      const codeForE2B = `;(async () => {
+  try {
+    const __sim_result = await (async () => {
+      ${code}
+    })();
+    console.log('__SIM_RESULT__=' + JSON.stringify(__sim_result));
+  } catch (error) {
+    console.log(String((error && (error.stack || error.message)) || error));
+    throw error;
+  }
+})();`
+
+      const e2bResult = await executeInE2B({
+        code: codeForE2B,
+        language: CodeLanguage.JavaScript,
         timeoutMs: LOOP_CONDITION_TIMEOUT_MS,
-        requestId,
-        ownerKey: `user:${ctx.userId}`,
-        ownerWeight: 1,
       })
 
-      if (vmResult.error) {
-        const isSystemError = vmResult.error.isSystemError === true
-        const logFn = isSystemError ? logger.error.bind(logger) : logger.warn.bind(logger)
-        logFn('Failed to evaluate loop condition', {
+      if (e2bResult.error) {
+        logger.error('Failed to evaluate loop condition in E2B', {
           condition,
           evaluatedCondition,
-          error: vmResult.error,
-          isSystemError,
+          error: e2bResult.error,
+          sandboxId: e2bResult.sandboxId,
         })
         return false
       }
 
-      const result = Boolean(vmResult.result)
+      const result = Boolean(e2bResult.result)
 
       logger.info('Loop condition evaluation result', {
         originalCondition: condition,

@@ -124,7 +124,6 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
       logger.info('Starting stagehand.init()')
       await stagehand.init()
       logger.info('Stagehand initialized successfully')
-      */
 
       const page = stagehand.context.pages()[0]
 
@@ -190,6 +189,7 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
         })
         throw extractError
       }
+      --- END STAGEHAND EXTRACT DISABLE --- */
     } catch (error) {
       logger.error('Stagehand extraction error', {
         error,

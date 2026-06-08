@@ -4,8 +4,8 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { createLogger } from '@sim/logger'
-import ffmpegStatic from 'ffmpeg-static'
-import ffmpeg from 'fluent-ffmpeg'
+// import ffmpegStatic from 'ffmpeg-static'
+// import ffmpeg from 'fluent-ffmpeg'
 import type {
   AudioExtractionOptions,
   AudioExtractionResult,
@@ -21,6 +21,7 @@ let ffmpegPath: string | null = null
  * Lazy initialization of FFmpeg - only runs when needed, not at module load
  */
 function ensureFfmpeg(): void {
+  throw new Error('Local FFmpeg extraction is disabled pending Cloud Media Provider integration.');
   if (ffmpegInitialized) {
     if (!ffmpegPath) {
       throw new Error(
@@ -33,11 +34,14 @@ function ensureFfmpeg(): void {
   ffmpegInitialized = true
 
   // Try ffmpeg-static binary
-  if (ffmpegStatic && typeof ffmpegStatic === 'string') {
+  // if (ffmpegStatic && typeof ffmpegStatic === 'string') {
+  if (false) {
     try {
+      /*
       fsSync.accessSync(ffmpegStatic, fsSync.constants.X_OK)
       ffmpegPath = ffmpegStatic
       ffmpeg.setFfmpegPath(ffmpegPath)
+      */
       logger.info('[FFmpeg] Using ffmpeg-static:', ffmpegPath)
       return
     } catch {
@@ -47,12 +51,14 @@ function ensureFfmpeg(): void {
 
   // Try system ffmpeg (cross-platform)
   try {
+    /*
     const cmd = process.platform === 'win32' ? 'where ffmpeg' : 'which ffmpeg'
     const result = execSync(cmd, { encoding: 'utf-8' }).trim()
     // On Windows, 'where' returns multiple paths - take first
     ffmpegPath = result.split('\n')[0]
     ffmpeg.setFfmpegPath(ffmpegPath)
     logger.info('[FFmpeg] Using system ffmpeg:', ffmpegPath)
+    */
     return
   } catch {
     // System ffmpeg not found
@@ -142,6 +148,7 @@ async function convertAudioWithFFmpeg(
 
     // Convert using FFmpeg
     await new Promise<void>((resolve, reject) => {
+      /*
       let command = ffmpeg(inputFile).toFormat(outputFormat).audioCodec(getAudioCodec(outputFormat))
 
       // Apply audio options
@@ -159,6 +166,8 @@ async function convertAudioWithFFmpeg(
         .on('end', () => resolve())
         .on('error', (err) => reject(new Error(`FFmpeg error: ${err.message}`)))
         .save(outputFile)
+      */
+      reject(new Error('Local FFmpeg conversion is disabled.'));
     })
 
     // Read output file
@@ -210,8 +219,10 @@ export async function getAudioMetadata(buffer: Buffer, mimeType: string): Promis
  * Get audio metadata from a file path using ffprobe
  */
 async function getAudioMetadataFromFile(filePath: string): Promise<AudioMetadata> {
+  throw new Error('Local FFmpeg metadata extraction is disabled pending Cloud Media Provider integration.');
   ensureFfmpeg() // Initialize FFmpeg/ffprobe
   return new Promise((resolve, reject) => {
+    /*
     ffmpeg.ffprobe(filePath, (err, metadata) => {
       if (err) {
         reject(new Error(`FFprobe error: ${err.message}`))
@@ -230,6 +241,7 @@ async function getAudioMetadataFromFile(filePath: string): Promise<AudioMetadata
         bitrate: format.bit_rate ? Number(format.bit_rate) : undefined,
       })
     })
+    */
   })
 }
 

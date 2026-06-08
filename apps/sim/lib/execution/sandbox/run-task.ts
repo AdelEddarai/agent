@@ -1,10 +1,12 @@
 import { createLogger } from '@sim/logger'
 import { generateShortId } from '@sim/utils/id'
-import {
-  executeInIsolatedVM,
-  type IsolatedVMBrokerHandler,
-  type IsolatedVMExecutionRequest,
-} from '@/lib/execution/isolated-vm'
+// import {
+//   executeInIsolatedVM,
+//   type IsolatedVMBrokerHandler,
+//   type IsolatedVMExecutionRequest,
+// } from '@/lib/execution/isolated-vm'
+type IsolatedVMBrokerHandler = any;
+type IsolatedVMExecutionRequest = any;
 import type { SandboxBrokerContext, SandboxTaskInput } from '@/lib/execution/sandbox/types'
 import { getSandboxTask, type SandboxTaskId } from '@/sandbox-tasks/registry'
 
@@ -51,6 +53,10 @@ export async function runSandboxTask<TInput extends SandboxTaskInput>(
   const task = getSandboxTask(taskId)
   const requestId = generateShortId(12)
 
+  logger.info('Sandbox task requested but isolated-vm is disabled', { taskId, requestId })
+  throw new Error("Local isolated-vm sandbox execution is disabled. Document preview generation is pending E2B Cloud integration.")
+
+  /* --- BEGIN ISOLATED-VM DISABLE ---
   const brokerContext: SandboxBrokerContext = {
     workspaceId: input.workspaceId,
     requestId,
@@ -80,7 +86,6 @@ export async function runSandboxTask<TInput extends SandboxTaskInput>(
 
   const start = Date.now()
   
-  /* --- BEGIN ISOLATED-VM DISABLE --- 
   const result = await executeInIsolatedVM(request, { brokers, signal: options.signal })
   const elapsedMs = Date.now() - start
   const queueMs = result.timings ? Math.max(0, elapsedMs - result.timings.total) : undefined
@@ -90,17 +95,4 @@ export async function runSandboxTask<TInput extends SandboxTaskInput>(
   const bytes = Buffer.from(result.bytesBase64, 'base64')
   return task.toResult(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength), input)
   --- END ISOLATED-VM DISABLE --- */
-
-  // E2B CLOUD IMPLEMENTATION
-  logger.info('Routing sandbox execution to E2B Cloud', { taskId, requestId })
-  
-  if (!process.env.E2B_API_KEY) {
-    throw new SandboxUserCodeError('E2B_API_KEY is not configured', 'ConfigurationError')
-  }
-
-  // TODO: Full E2B integration using @e2b/code-interpreter 
-  // const sandbox = await Sandbox.create({ apiKey: process.env.E2B_API_KEY })
-  // const execResult = await sandbox.runCode(input.code)
-  
-  throw new Error("E2B Cloud Execution is enabled but pending full API integration for this specific task type.")
 }

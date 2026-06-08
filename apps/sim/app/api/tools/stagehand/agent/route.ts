@@ -194,7 +194,6 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
       logger.info('Starting stagehand.init()')
       await stagehand.init()
       logger.info('Stagehand initialized successfully')
-      */
 
       sessionId = stagehand.browserbaseSessionID ?? null
       if (sessionId) {
@@ -332,6 +331,7 @@ export const POST = withRouteHandler(async (request: NextRequest) => {
         liveViewUrl,
         sessionId,
       })
+      --- END STAGEHAND AGENT DISABLE --- */
     } catch (error) {
       logger.error('Stagehand agent execution error', {
         error,

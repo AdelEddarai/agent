@@ -12,7 +12,8 @@ import { isE2bEnabled } from '@/lib/core/config/feature-flags'
 import { generateRequestId } from '@/lib/core/utils/request'
 import { withRouteHandler } from '@/lib/core/utils/with-route-handler'
 import { executeInE2B, executeShellInE2B } from '@/lib/execution/e2b'
-import { executeInIsolatedVM, type IsolatedVMBrokerHandler } from '@/lib/execution/isolated-vm'
+// import { executeInIsolatedVM, type IsolatedVMBrokerHandler } from '@/lib/execution/isolated-vm'
+type IsolatedVMBrokerHandler = any;
 import { CodeLanguage, DEFAULT_CODE_LANGUAGE, isValidCodeLanguage } from '@/lib/execution/languages'
 import { recordMaterializedAccessKeys } from '@/lib/execution/payloads/access-keys'
 import {
@@ -1173,14 +1174,11 @@ export const POST = withRouteHandler(async (req: NextRequest) => {
       )
     }
 
-    const useE2B =
-      isE2bEnabled &&
-      !isCustomTool &&
-      (lang === CodeLanguage.Python || (lang === CodeLanguage.JavaScript && hasImports))
+    const useE2B = true // E2B is now the default execution environment for all languages
 
-    if (useE2B && containsLargeValueRef(contextVariables)) {
+    if (containsLargeValueRef(contextVariables)) {
       throw new Error(
-        'Large execution values require the JavaScript isolated-vm runtime. Remove imports, select a nested field, or read the value in a JavaScript function without E2B.'
+        'Execution context variables are too large for the E2B payload. Select a nested field, or limit the size of the variables.'
       )
     }
 
@@ -1208,6 +1206,17 @@ export const POST = withRouteHandler(async (req: NextRequest) => {
         prologueLineCount++
         prologue += `const environmentVariables = JSON.parse(${JSON.stringify(JSON.stringify(envVars))});\n`
         prologueLineCount++
+
+        const isSafeParamKey = (key: string) => SAFE_IDENTIFIER.test(key) && !JS_RESERVED_WORDS.has(key)
+        if (isCustomTool) {
+          Object.keys(executionParams).forEach((key) => {
+            if (isSafeParamKey(key)) {
+              prologue += `const ${key} = params.${key};\n`
+              prologueLineCount++
+            }
+          })
+        }
+
         for (const [k, v] of Object.entries(contextVariables)) {
           prologue += `globalThis[${JSON.stringify(k)}] = ${formatLiteralForCode(v, 'javascript')};\n`
           prologue += `const ${k} = globalThis[${JSON.stringify(k)}];\n`
@@ -1384,130 +1393,9 @@ export const POST = withRouteHandler(async (req: NextRequest) => {
         routeContext
       )
     }
-
-    const executionMethod = 'isolated-vm'
-
-    const isSafeParamKey = (key: string) => SAFE_IDENTIFIER.test(key) && !JS_RESERVED_WORDS.has(key)
-
-    const wrapperLines = ['(async () => {', '  try {']
-    if (isCustomTool) {
-      Object.keys(executionParams).forEach((key) => {
-        if (isSafeParamKey(key)) {
-          wrapperLines.push(`    const ${key} = params.${key};`)
-        } else {
-          logger.warn('Skipping param key — not a safe JS identifier', { key, requestId })
-        }
-      })
-    }
-    userCodeStartLine = wrapperLines.length + 1
-
-    let codeToExecute = resolvedCode
-    let prependedLineCount = 0
-    if (isCustomTool) {
-      const paramKeys = Object.keys(executionParams).filter(isSafeParamKey)
-      const paramDestructuring = paramKeys.map((key) => `const ${key} = params.${key};`).join('\n')
-      codeToExecute = `${paramDestructuring}\n${resolvedCode}`
-      prependedLineCount = paramKeys.length
     }
 
-    const isolatedResult = await executeInIsolatedVM(
-      {
-        code: codeToExecute,
-        params: executionParams,
-        envVars,
-        contextVariables,
-        timeoutMs: timeout,
-        requestId,
-        ownerKey: `user:${auth.userId}`,
-        ownerWeight: 1,
-      },
-      { brokers: createFunctionRuntimeBrokers(routeContext) }
-    )
-
-    const executionTime = Date.now() - startTime
-
-    if (isolatedResult.error) {
-      const isSystemError = isolatedResult.error.isSystemError === true
-      const logFn = isSystemError ? logger.error.bind(logger) : logger.warn.bind(logger)
-      logFn(`[${requestId}] Function execution failed in isolated-vm`, {
-        error: isolatedResult.error,
-        executionTime,
-        isSystemError,
-      })
-
-      const ivmError = isolatedResult.error
-      let adjustedLine = ivmError.line
-      let adjustedLineContent = ivmError.lineContent
-      if (prependedLineCount > 0 && ivmError.line !== undefined) {
-        adjustedLine = Math.max(1, ivmError.line - prependedLineCount)
-      }
-      const errorDisplayCode = getErrorDisplayCode(sourceCodeForErrors, resolvedCode)
-      const displayMessage = getErrorDisplayMessage(
-        ivmError.message,
-        sourceCodeForErrors,
-        resolvedCode
-      )
-      adjustedLineContent = getLineContent(errorDisplayCode, adjustedLine) ?? adjustedLineContent
-      const enhancedError: EnhancedError = {
-        message: displayMessage,
-        name: ivmError.name,
-        stack: ivmError.stack,
-        originalError: ivmError,
-        line: adjustedLine,
-        column: ivmError.column,
-        lineContent: adjustedLineContent,
-      }
-
-      const userFriendlyErrorMessage = createUserFriendlyErrorMessage(
-        enhancedError,
-        requestId,
-        errorDisplayCode
-      )
-
-      const detailLogFn = isSystemError ? logger.error.bind(logger) : logger.warn.bind(logger)
-      detailLogFn(`[${requestId}] Enhanced error details`, {
-        originalMessage: ivmError.message,
-        enhancedMessage: userFriendlyErrorMessage,
-        line: enhancedError.line,
-        column: enhancedError.column,
-        lineContent: enhancedError.lineContent,
-        errorType: enhancedError.name,
-      })
-
-      return functionJsonResponse(
-        {
-          success: false,
-          error: userFriendlyErrorMessage,
-          output: {
-            result: null,
-            stdout: cleanStdout(isolatedResult.stdout),
-            executionTime,
-          },
-          debug: {
-            line: enhancedError.line,
-            column: enhancedError.column,
-            errorType: enhancedError.name,
-            lineContent: enhancedError.lineContent,
-            stack: enhancedError.stack,
-          },
-        },
-        routeContext,
-        { status: isSystemError ? 500 : 422 }
-      )
-    }
-
-    stdout = isolatedResult.stdout
-    logger.info(`[${requestId}] Function executed successfully using ${executionMethod}`, {
-      executionTime,
-    })
-
-    return functionJsonResponse(
-      {
-        success: true,
-        output: { result: isolatedResult.result, stdout: cleanStdout(stdout), executionTime },
-      },
-      routeContext
-    )
+    throw new Error('No supported execution method found. E2B is required.');
   } catch (error: any) {
     const executionTime = Date.now() - startTime
     if (isExecutionResourceLimitError(error)) {
