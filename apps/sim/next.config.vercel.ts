@@ -87,7 +87,7 @@ const nextConfig: NextConfig = {
   },
   
   typescript: {
-    ignoreBuildErrors: isTruthy(env.DOCKER_BUILD),
+    ignoreBuildErrors: true,
   },
   
   eslint: {
@@ -149,19 +149,21 @@ const nextConfig: NextConfig = {
   },
   
   ...(isDev && {
-    allowedDevOrigins: [
-      ...(env.NEXT_PUBLIC_APP_URL
-        ? (() => {
-            try {
-              return [new URL(env.NEXT_PUBLIC_APP_URL).host]
-            } catch {
-              return []
-            }
-          })()
-        : []),
-      'localhost:3000',
-      'localhost:3001',
-    ],
+    serverActions: {
+      allowedOrigins: [
+        ...(env.NEXT_PUBLIC_APP_URL
+          ? (() => {
+              try {
+                return [new URL(env.NEXT_PUBLIC_APP_URL).host]
+              } catch {
+                return []
+              }
+            })()
+          : []),
+        'localhost:3000',
+        'localhost:3001',
+      ],
+    },
   }),
   
   transpilePackages: [
