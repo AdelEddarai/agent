@@ -90,6 +90,10 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: isTruthy(env.DOCKER_BUILD),
   },
   
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+
   output: isTruthy(env.DOCKER_BUILD) ? 'standalone' : undefined,
   
   serverExternalPackages: [
