@@ -1393,7 +1393,6 @@ export const POST = withRouteHandler(async (req: NextRequest) => {
         routeContext
       )
     }
-    }
 
     throw new Error('No supported execution method found. E2B is required.');
   } catch (error: any) {
