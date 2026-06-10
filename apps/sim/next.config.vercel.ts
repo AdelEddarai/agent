@@ -25,7 +25,7 @@ const nextConfig: NextConfig = {
   // Optimize build memory usage
   ...(isVercelBuild && {
     productionBrowserSourceMaps: false,
-    swcMinify: true,
+    swcMinify: false, // DISABLED: SWC minification (Rust) uses ~500MB of untracked memory outside of V8
   }),
   
   images: {
@@ -177,7 +177,7 @@ const nextConfig: NextConfig = {
     if (isVercelBuild) {
       // Extreme memory reduction
       config.optimization = config.optimization || {}
-      config.optimization.minimize = true
+      config.optimization.minimize = false // DISABLED: Minification causes enormous RAM spikes in SWC/Terser
       config.optimization.splitChunks = false // Disable to save memory
       config.optimization.runtimeChunk = false
       
